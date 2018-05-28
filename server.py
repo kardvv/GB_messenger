@@ -5,19 +5,28 @@
 # https://github.com/kardvv/GB_messenger
 # The client part of messenger
 
+import select
 import socket
 import json
 import time
 import sys
 import argparse
+import server_log
 
 
-version = '0.1'
+version = '0.2'
 
 # Constant
-client_name = 'Test_Client'
-client_status = 'Test_Status'
+users = []
+size = 1024
 
+# decorration for logger
+def log(func):
+    def decorated(*args, **kwargs):
+        res = func(*args, **kwargs)
+        server_log.logger.info('{}({}, {}) = {}'.format(func.__name__, args, kwargs, res))
+        return res
+    return decorated
 
 # param from command line
 def param_parser():
@@ -44,6 +53,7 @@ def server_time():
 
 
 # convert message before sending to server
+@log
 def encoding_message(message):
     message_json = json.dumps(message)
     message_b = message_json.encode('utf-8')
@@ -51,6 +61,7 @@ def encoding_message(message):
 
 
 # convert message after receiving from server
+@log
 def decoding_message(message_b):
     message_json = message_b.decode('utf-8')
     message = json.loads(message_json)
@@ -63,6 +74,22 @@ probe_message = {
     'time': server_time()
 }
 
+def connection_requests(client, clients):
+    try:
+        client.send(encoding_message(probe_message))
+        data = client.recv(size)
+        input_message = decoding_message(data)
+        if input_message['action'] == 'presence':
+            server_log.logger.info('User: {} connection. Status: {}.'.format(
+				input_message['user']['name'], input_message['user']['status'])
+            )
+            clients.append(client)
+    except:
+        server_log.logger.info('Клиент {} {} отключился'.format(client.fileno(), client.getpeername()))
+        clients.remove(client)
+    return
+
+
 if __name__ == '__main__':
     # command line parameters parser
     command_param = param_parser()
@@ -70,7 +97,6 @@ if __name__ == '__main__':
     listen_addr = command_param_name.a
     server_port = command_param_name.p
 
-    print('Server is start!')
     # Create TCP soket
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     # Start connection to server
@@ -78,21 +104,40 @@ if __name__ == '__main__':
     # waiting for requests
     # maximum 5 requests at a time
     server_socket.listen(5)
+    server_socket.settimeout(0.2)
+
+    clients = []
 
     # Main part
     while True:
-        print('Waiting connection from clients')
-        client, addr = server_socket.accept()
-        print('Received a connection request from {}'.format(addr))
-        # sending a massage
-        client.send(encoding_message(probe_message))
-        data = client.recv(1024)
-        input_message = decoding_message(data)
-        if input_message['action'] == 'presence':
-            print('User: {} connection. Status: {}.'.format(
-                input_message['user']['name'],input_message['user']['status'])
-            )
-        # поэтому выполняется кодирование строки
-        client.close()
+        try:
+            client, addr = server_socket.accept()
+        except socket.timeout:
+            pass
+        else:
+            server_log.logger.info('Received a connection request from {}'.format(addr))
+            connection_requests(client, clients)
+        finally:
+            writes = []
+            reads = []
+            try:
+                writes, reads, e = select.select(clients, clients, clients, 0)
+            except:
+                pass
 
-    print('Server is stop!')
+            for client in writes:
+                try:
+                    data = client.recv(size)
+                    input_message = decoding_message(data)
+                    for client in reads:
+                        try:
+                            client.send(encoding_message(input_message))
+                        except:
+                            clients.remove(client)
+            
+                except:
+                    server_log.logger.info('Клиент {} {} отключился'.format(client.fileno(), client.getpeername()))
+                    clients.remove(client)
+                    client.close()
+
+    server_log.logger.info('Server stoped!')

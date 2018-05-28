@@ -10,12 +10,14 @@ import json
 import time
 import sys
 import argparse
+import client_log
 
-version = '0.1'
+version = '0.2'
 
 # Constant
 client_name = 'Test_Client'
 client_status = 'Test_Status'
+size = 1024
 
 
 # param from command line
@@ -73,23 +75,39 @@ if __name__ == '__main__':
     server_addr = command_param_name.addr
     server_port = command_param_name.port
 
+    client_log.logger.info('Client is start!')
     print('Client is start!')
-    # Create TCP soket
-    client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as client_socket:
+        try:
+            client_socket.connect((server_addr, server_port))
+            data = client_socket.recv(size)
+            input_message = decoding_message(data)
+            
+            # Probe message
+            if input_message['action'] == 'probe':
+                client_log.logger.info('Connection to Server is OK!')
+                print('Connection to Server is OK!')
+                client_socket.send(encoding_message(connection_message))
+			
+			# Work sender or recever 
+            choise = input('Send messege? (Y/N)')
+            while True:
+                
+                if choise == 'Y':
+                    msg = input('Input message: ')
+                    client_socket.send(encoding_message(msg))
 
-    try:
-        # start connection to server
-        client_socket.connect((server_addr, server_port))
-        # receiving from server
-        data = client_socket.recv(1024)
-        input_message = decoding_message(data)
-        #
-        if input_message['action'] == 'probe':
-            print('Connection to Server is OK!')
-            client_socket.send(encoding_message(connection_message))
-        # close connection to server
-        client_socket.close()
-    except ConnectionRefusedError:
-        print('Server is not answer')
+                else:
+                    print('Hold message from server!')
+                    data = client_socket.recv(size)
+                    input_message = decoding_message(data)
+                    print(input_message)
+
+        except ConnectionRefusedError:
+            client_log.logger.info('Server is not answer')
+            print('Server is not answer')
+        except ConnectionResetError:
+            client_log.logger.info('Server was broke connection')
+            print('Server was broke connection')
 
     print('Client is stop!')
